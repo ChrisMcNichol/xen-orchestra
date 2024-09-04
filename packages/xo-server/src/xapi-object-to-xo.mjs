@@ -99,7 +99,6 @@ const TRANSFORMS = {
     const cpuInfo = obj.cpu_info
     return {
       auto_poweron: obj.other_config.auto_poweron === 'true',
-      secureBootSetup: obj.custom_uefi_certificates !== undefined && obj.custom_uefi_certificates !== '',
       crashDumpSr: link(obj, 'crash_dump_SR'),
       current_operations: obj.current_operations,
       default_SR: link(obj, 'default_SR'),
@@ -632,6 +631,7 @@ const TRANSFORMS = {
     const vdi = {
       type: 'VDI',
 
+      cbt_enabled: obj.cbt_enabled,
       missing: obj.missing,
       name_description: obj.name_description,
       name_label: obj.name_label,

@@ -7,9 +7,7 @@ import { asyncEach } from '@vates/async-each'
 import { createLogger } from '@xen-orchestra/log'
 import { decorateObject } from '@vates/decorate-with'
 import { defer as deferrable } from 'golike-defer'
-import { parseXml as parseXmlTree } from '@vates/xml/parse'
 import { Task } from '@xen-orchestra/mixins/Tasks.mjs'
-import { xmlRpcParser } from '@vates/xml-rpc/parser'
 
 import ensureArray from '../../_ensureArray.mjs'
 import { debounceWithKey } from '../../_pDebounceWithKey.mjs'
@@ -310,8 +308,7 @@ const methods = {
     hosts = hosts.sort(({ $ref }) => ($ref === this.pool.master ? -1 : 1))
     for (const host of hosts) {
       // With throw in case of error with XCP-ng>=8.2.1
-      const xml = await this.callAsync('host.call_plugin', host.$ref, 'updater.py', 'update', {})
-      const result = JSON.parse(xmlRpcParser.parse_value(parseXmlTree(xml)))
+      const result = await this.callAsync('host.call_plugin', host.$ref, 'updater.py', 'update', {})
 
       // Defined and different than 0 in case of error with XCP-ng<8.2.1
       const { exit } = result
@@ -490,7 +487,7 @@ const methods = {
     throw new Error('non pool-wide install not implemented')
   },
 
-  async rollingPoolUpdate($defer, { xsCredentials } = {}) {
+  async rollingPoolUpdate($defer, parentTask, { xsCredentials } = {}) {
     // Temporary workaround until XCP-ng finds a way to update linstor packages
     if (some(this.objects.indexes.type.SR, { type: 'linstor' })) {
       throw new Error('rolling pool update not possible since there is a linstor SR in the pool')
@@ -500,34 +497,31 @@ const methods = {
 
     const hasMissingPatchesByHost = {}
     const hosts = filter(this.objects.all, { $type: 'host' })
-    await Task.run(
-      { properties: { name: `Listing missing patches`, total: hosts.length, progress: 0, done: 0 } },
-      async () => {
-        let done = 0
-        await asyncEach(hosts, async host => {
-          const hostUuid = host.uuid
-          await Task.run(
-            {
-              properties: {
-                name: `Listing missing patches for host ${hostUuid}`,
-                hostId: hostUuid,
-                hostName: host.name_label,
-              },
+    const subtask = new Task({ properties: { name: `Listing missing patches`, total: hosts.length, progress: 0 } })
+    await subtask.run(async () => {
+      let done = 0
+      await asyncEach(hosts, async host => {
+        const hostUuid = host.uuid
+        await Task.run(
+          {
+            properties: {
+              name: `Listing missing patches for host ${hostUuid}`,
+              hostId: hostUuid,
+              hostName: host.name_label,
             },
-            async () => {
-              const missingPatches = await this.listMissingPatches(hostUuid)
-              hasMissingPatchesByHost[hostUuid] = missingPatches.length > 0
-            }
-          )
-          done++
-          Task.set('done', done)
-          Task.set('progress', Math.round((done * 100) / hosts.length))
-        })
-      }
-    )
+          },
+          async () => {
+            const missingPatches = await this.listMissingPatches(hostUuid)
+            hasMissingPatchesByHost[hostUuid] = missingPatches.length > 0
+          }
+        )
+        done++
+        subtask.set('progress', Math.round((done * 100) / hosts.length))
+      })
+    })
 
     return Task.run({ properties: { name: `Updating and rebooting` } }, async () => {
-      await this.rollingPoolReboot({
+      await this.rollingPoolReboot(parentTask, {
         xsCredentials,
         beforeEvacuateVms: async () => {
           // On XS/CH, start by installing patches on all hosts

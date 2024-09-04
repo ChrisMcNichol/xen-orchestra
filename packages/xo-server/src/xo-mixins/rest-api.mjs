@@ -8,14 +8,21 @@ import { pipeline } from 'node:stream/promises'
 import { json, Router } from 'express'
 import { Readable } from 'node:stream'
 import cloneDeep from 'lodash/cloneDeep.js'
+import groupBy from 'lodash/groupBy.js'
 import path from 'node:path'
 import pDefer from 'promise-toolbox/defer'
 import pick from 'lodash/pick.js'
+import semver from 'semver'
+import throttle from 'lodash/throttle.js'
 import * as CM from 'complex-matcher'
 import { VDI_FORMAT_RAW, VDI_FORMAT_VHD } from '@xen-orchestra/xapi'
+import { parse } from 'xo-remote-parser'
 
-import { getUserPublicProperties } from '../utils.mjs'
+import { getUserPublicProperties, isSrWritable } from '../utils.mjs'
 import { compileXoJsonSchema } from './_xoJsonSchema.mjs'
+
+// E.g: 'value: 0.6\nconfig:\n<variable>\n<name value="cpu_usage"/>\n<alarm_trigger_level value="0.4"/>\n<alarm_trigger_period value ="60"/>\n</variable>';
+const ALARM_BODY_REGEX = /^value:\s*(\d+(?:\.\d+)?)\s*config:\s*<variable>\s*<name value="(.*?)"/
 
 const { join } = path.posix
 const noop = Function.prototype
@@ -70,8 +77,11 @@ async function* makeNdJsonStream(iterable) {
 function makeObjectMapper(req, path = req.path) {
   const { query } = req
 
-  const basePath = join(req.baseUrl, path)
-  const makeUrl = ({ id }) => join(basePath, typeof id === 'number' ? String(id) : id)
+  const { baseUrl } = req
+  const makeUrl =
+    typeof path === 'function'
+      ? object => join(baseUrl, path(object), typeof object.id === 'number' ? String(object.id) : object.id)
+      : ({ id }) => join(baseUrl, path, typeof id === 'number' ? String(id) : id)
 
   let objectMapper
   let { fields } = query
@@ -146,6 +156,243 @@ function wrap(middleware, handleNoSuchObject = false) {
     }
   }
 }
+
+async function _getDashboardStats(app) {
+  const dashboard = {}
+
+  let hvSupportedVersions
+  let nHostsEol
+  if (typeof app.getHVSupportedVersions === 'function') {
+    try {
+      hvSupportedVersions = await app.getHVSupportedVersions()
+      nHostsEol = 0
+    } catch (error) {
+      console.error(error)
+    }
+  }
+
+  const poolIds = new Set()
+  const hosts = []
+  const writableSrs = []
+  const alarms = []
+
+  for (const obj of app.objects.values()) {
+    if (obj.type === 'host') {
+      hosts.push(obj)
+      poolIds.add(obj.$pool)
+      if (hvSupportedVersions !== undefined && !semver.satisfies(obj.version, hvSupportedVersions[obj.productBrand])) {
+        nHostsEol++
+      }
+    }
+
+    if (obj.type === 'SR') {
+      if (isSrWritable(obj)) {
+        writableSrs.push(obj)
+      }
+    }
+
+    if (obj.type === 'message' && obj.name === 'ALARM') {
+      alarms.push(obj)
+    }
+  }
+
+  dashboard.nPools = poolIds.size
+  dashboard.nHosts = hosts.length
+  dashboard.nHostsEol = nHostsEol
+
+  if (await app.hasFeatureAuthorization('LIST_MISSING_PATCHES')) {
+    const poolsWithMissingPatches = new Set()
+    let nHostsWithMissingPatches = 0
+
+    await asyncEach(hosts, async host => {
+      const xapi = app.getXapi(host)
+      try {
+        const patches = await xapi.listMissingPatches(host)
+        if (patches.length > 0) {
+          nHostsWithMissingPatches++
+          poolsWithMissingPatches.add(host.$pool)
+        }
+      } catch (error) {
+        console.error(error)
+      }
+    })
+
+    const missingPatches = {
+      nHostsWithMissingPatches,
+      nPoolsWithMissingPatches: poolsWithMissingPatches.size,
+    }
+
+    dashboard.missingPatches = missingPatches
+  }
+
+  try {
+    const remotes = await app.getAllRemotes()
+    const remotesInfo = await app.getAllRemotesInfo()
+
+    const backupRepositoriesSize = remotes.reduce(
+      (prev, remote) => {
+        const { type } = parse(remote.url)
+        const remoteInfo = remotesInfo[remote.id]
+
+        if (!remote.enabled || type === 's3' || remoteInfo === undefined) {
+          return prev
+        }
+
+        return {
+          available: prev.available + remoteInfo.available,
+          backups: 0, // @TODO: compute the space used by backups
+          other: 0, // @TODO: compute the space used by everything that is not a backup
+          total: prev.total + remoteInfo.size,
+          used: prev.used + remoteInfo.used,
+        }
+      },
+      {
+        available: 0,
+        backups: 0,
+        other: 0,
+        total: 0,
+        used: 0,
+      }
+    )
+    dashboard.backupRepositories = { size: backupRepositoriesSize }
+  } catch (error) {
+    console.error(error)
+  }
+
+  const storageRepositoriesSize = writableSrs.reduce(
+    (prev, sr) => ({
+      total: prev.total + sr.size,
+      used: prev.used + sr.physical_usage,
+    }),
+    {
+      total: 0,
+      used: 0,
+    }
+  )
+  storageRepositoriesSize.available = storageRepositoriesSize.total - storageRepositoriesSize.used
+  storageRepositoriesSize.other = 0 // @TODO: compute the space used by everything that is not a replicated VM
+  storageRepositoriesSize.replicated = 0 // @TODO: compute the space used by replicated VMs
+
+  dashboard.storageRepositories = { size: storageRepositoriesSize }
+
+  async function _jobHasAtLeastOneScheduleEnabled(job) {
+    for (const maybeScheduleId in job.settings) {
+      if (maybeScheduleId === '') {
+        continue
+      }
+
+      try {
+        const schedule = await app.getSchedule(maybeScheduleId)
+        if (schedule.enabled) {
+          return true
+        }
+      } catch (error) {
+        if (!noSuchObject.is(error, { id: maybeScheduleId, type: 'schedule' })) {
+          console.error(error)
+        }
+        continue
+      }
+    }
+    return false
+  }
+
+  try {
+    const [logs, jobs] = await Promise.all([
+      app.getBackupNgLogsSorted({
+        filter: log => log.message === 'backup' || log.message === 'metadata',
+      }),
+      Promise.all([app.getAllJobs('backup'), app.getAllJobs('mirrorBackup'), app.getAllJobs('metadataBackup')]).then(
+        jobs => jobs.flat(1)
+      ),
+    ])
+    const logsByJob = groupBy(logs, 'jobId')
+
+    let disabledJobs = 0
+    let failedJobs = 0
+    let skippedJobs = 0
+    let successfulJobs = 0
+    const backupJobIssues = []
+
+    for (const job of jobs) {
+      if (!(await _jobHasAtLeastOneScheduleEnabled(job))) {
+        disabledJobs++
+        continue
+      }
+
+      const jobLogs = logsByJob[job.id]?.slice(-3)
+      if (jobLogs === undefined || jobLogs.length === 0) {
+        continue
+      }
+
+      for (let i = 0; i < jobLogs.length; i++) {
+        const { status } = jobLogs[i]
+        const isLastElement = i === jobLogs.length - 1
+
+        if (status !== 'success') {
+          if (status === 'failure' || status === 'interrupted') {
+            failedJobs++
+          } else if (status === 'skipped') {
+            skippedJobs++
+          }
+
+          backupJobIssues.push({ uuid: job.id, logs: jobLogs.map(log => log.status) })
+
+          break
+        }
+
+        if (isLastElement) {
+          successfulJobs++
+        }
+      }
+    }
+
+    dashboard.backups = {
+      jobs: {
+        disabled: disabledJobs,
+        failed: failedJobs,
+        skipped: skippedJobs,
+        successful: successfulJobs,
+        total: jobs.length,
+      },
+      issues: backupJobIssues,
+    }
+  } catch (error) {
+    console.error(error)
+  }
+
+  dashboard.alarms = alarms.reduce((acc, { $object, body, time }) => {
+    try {
+      const [, value, name] = body.match(ALARM_BODY_REGEX)
+
+      let object
+      try {
+        object = app.getObject($object)
+      } catch (error) {
+        console.error(error)
+        object = {
+          type: 'unknown',
+          uuid: $object,
+        }
+      }
+
+      acc.push({
+        name,
+        object: {
+          type: object.type,
+          uuid: object.uuid,
+        },
+        timestamp: time,
+        value: +value,
+      })
+    } catch (error) {
+      console.error(error)
+    }
+
+    return acc
+  }, [])
+  return dashboard
+}
+const getDashboardStats = throttle(_getDashboardStats, 6e4, { trailing: false, leading: true })
 
 export default class RestApi {
   #api
@@ -263,7 +510,7 @@ export default class RestApi {
           const response = await host.$xapi.getResource('/host_logs_download', { host })
 
           res.setHeader('content-type', 'application/gzip')
-          await pipeline(response.body, (req, res))
+          await pipeline(response.body, res)
         },
 
         async missing_patches(req, res) {
@@ -298,6 +545,36 @@ export default class RestApi {
           })
           res.json(Array.from(missingPatches.values()))
         },
+      }
+
+      {
+        async function vdis(req, res) {
+          const vdis = new Map()
+          for (const vbdId of req.object.$VBDs) {
+            try {
+              const vbd = app.getObject(vbdId, 'VBD')
+              const vdiId = vbd.VDI
+              if (vdiId !== undefined) {
+                const vdi = app.getObject(vdiId, ['VDI', 'VDI-snapshot'])
+                vdis.set(vdiId, vdi)
+              }
+            } catch (error) {
+              console.warn('REST API', req.url, { error })
+            }
+          }
+
+          const { query } = req
+          await sendObjects(
+            handleArray(Array.from(vdis.values()), handleOptionalUserFilter(query.filter), ifDef(query.limit, Number)),
+            req,
+            res,
+            makeObjectMapper(req, ({ type }) => type.toLowerCase() + 's')
+          )
+        }
+
+        for (const collection of ['vms', 'vm-snapshots', 'vm-templates']) {
+          collections[collection].routes.vdis = vdis
+        }
       }
 
       collections.pools.actions = {
@@ -339,6 +616,11 @@ export default class RestApi {
 
           await xapiObject.$xapi.pool_emergencyShutdown()
         },
+        rolling_reboot: async ({ object }) => {
+          await app.checkFeatureAuthorization('ROLLING_POOL_REBOOT')
+
+          await app.rollingPoolReboot(object)
+        },
         rolling_update: async ({ object }) => {
           await app.checkFeatureAuthorization('ROLLING_POOL_UPDATE')
 
@@ -352,7 +634,7 @@ export default class RestApi {
         hard_shutdown: ({ xapiObject: vm }) => vm.$callAsync('hard_shutdown').then(noop),
         snapshot: withParams(
           async ({ xapiObject: vm }, { name_label }) => {
-            const ref = await vm.$snapshot({ name_label })
+            const ref = await vm.$snapshot({ ignoredVdisTag: '[NOSNAP]', name_label })
             return vm.$xapi.getField('VM', ref, 'uuid')
           },
           { name_label: { type: 'string', optional: true } }
@@ -423,6 +705,14 @@ export default class RestApi {
         return stream[Symbol.asyncIterator]()
       },
     }
+    collections.servers = {
+      getObject(id) {
+        return app.getXenServer(id)
+      },
+      async getObjects(filter, limit) {
+        return handleArray(await app.getAllXenServers(), filter, limit)
+      },
+    }
     collections.users = {
       getObject(id) {
         return app.getUser(id).then(getUserPublicProperties)
@@ -446,6 +736,7 @@ export default class RestApi {
         },
       },
     }
+    collections.dashboard = {}
 
     // normalize collections
     for (const id of Object.keys(collections)) {
@@ -476,10 +767,15 @@ export default class RestApi {
       }
     })
     api.param('object', async (req, res, next) => {
+      const { collection } = req
+      if (collection === undefined || collection.getObject === undefined) {
+        return next('route')
+      }
+
       const id = req.params.object
       try {
         // eslint-disable-next-line require-atomic-updates
-        req.object = await req.collection.getObject(id, req)
+        req.object = await collection.getObject(id, req)
         return next()
       } catch (error) {
         if (noSuchObject.is(error, { id })) {
@@ -553,6 +849,13 @@ export default class RestApi {
     api.get('/backup/jobs/:id', (req, res) => {
       res.redirect(308, req.baseUrl + '/backup/jobs/vm/' + req.params.id)
     })
+
+    api.get(
+      '/dashboard',
+      wrap(async (req, res) => {
+        res.json(await getDashboardStats(app))
+      })
+    )
 
     api
       .get(

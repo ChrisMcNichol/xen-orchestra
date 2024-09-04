@@ -1,24 +1,71 @@
 {
-  "core": {
-    "close": "Fermer",
-    "coming-soon": "Bientôt disponible !",
-    "current": "Actuel",
-    "filter": "Filtrer",
-    "group": "Grouper",
-    "hide": "Masquer",
-    "log-out": "Se déconnecter",
-    "master": "Hôte primaire",
-    "open": "Ouvrir",
-    "quick-actions": "Actions rapides",
-    "sidebar": {
-      "close": "Fermer la barre latérale",
-      "lock": "Verrouiller la barre latérale",
-      "open": "Ouvrir la barre latérale",
-      "unlock": "Déverrouiller la barre latérale"
-    },
-    "sort": {
-      "ascending": "Trier par ordre croissant",
-      "descending": "Trier par ordre décroissant"
-    }
-  }
+  "alarms": "Alarmes",
+
+  "bytes.ki": "Kio",
+  "bytes.mi": "Mio",
+  "bytes.gi": "Gio",
+
+  "coming-soon": "Bientôt disponible !",
+  "console": "Console",
+
+  "core.copied": "Copié",
+  "core.copy-id": "Copier l'ID",
+  "core.close": "Fermer",
+  "core.current": "Actuel",
+  "core.filter": "Filtrer",
+  "core.group": "Grouper",
+  "core.hide": "Masquer",
+  "core.open": "Ouvrir",
+  "core.quick-actions": "Actions rapides",
+
+  "core.search": "Rechercher",
+
+  "core.query-search-bar.label": "Moteur de recherche",
+  "core.query-search-bar.placeholder": "Écrivez votre requête…",
+  "core.query-search-bar.use-query-builder": "Utiliser le constructeur de requête",
+
+  "core.select.all": "Tout sélectionner",
+  "core.select.none": "Tout désélectionner",
+
+  "core.sidebar.close": "Fermer la barre latérale",
+  "core.sidebar.lock": "Verrouiller la barre latérale",
+  "core.sidebar.open": "Ouvrir la barre latérale",
+  "core.sidebar.unlock": "Déverrouiller la barre latérale",
+
+  "core.sort.ascending": "Trier par ordre croissant",
+  "core.sort.descending": "Trier par ordre décroissant",
+
+  "dark-mode.enable": "Activer le mode sombre",
+  "dark-mode.disable": "Désactiver le mode sombre",
+  "dark-mode.auto": "Mode sombre automatique",
+
+  "dashboard": "Tableau de bord",
+  "documentation-name": "Documentation {name}",
+  "hosts": "Hôtes",
+  "loading-in-progress": "Chargement en cours…",
+  "log-out": "Se déconnecter",
+  "master": "Hôte primaire",
+  "n-vms": "1 VM | {n} VMs",
+  "network": "Réseau",
+  "object-not-found": "L'objet {id} est introuvable…",
+  "patches": "Patches",
+  "power-on-for-console": "Allumez votre VM pour accéder à sa console",
+  "running-vm": "VM en cours d'exécution | VMs en cours d'exécution",
+  "see-all": "Voir tout",
+  "stats": "Stats",
+  "storage": "Stockage",
+  "support-name": "Support pro {name}",
+  "system": "Système",
+
+  "tasks": "Tâches",
+  "tasks.n-subtasks": "{n} sous-tâche | {n} sous-tâches",
+  "tasks.no-tasks": "Aucune tâche",
+  "tasks.quick-view": "Vue rapide des tâches",
+  "tasks.quick-view.all": "Toutes",
+  "tasks.quick-view.done": "Terminées",
+  "tasks.quick-view.failed": "Échouées",
+  "tasks.quick-view.in-progress": "En cours",
+
+  "total": "Total",
+  "vms": "VMs"
 }

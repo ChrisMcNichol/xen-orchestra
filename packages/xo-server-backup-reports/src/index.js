@@ -1,12 +1,10 @@
-import Handlebars from 'handlebars'
 import moment from 'moment-timezone'
 import { createLogger } from '@xen-orchestra/log'
-import { forEach, groupBy } from 'lodash'
 import { get } from '@xen-orchestra/defined'
-import { extname, join, parse } from 'node:path'
-import { readdirSync, readFileSync } from 'node:fs'
+import { forEach, groupBy } from 'lodash'
+
 import pkg from '../package'
-import './helpers'
+import * as templates from '../templates/index.js'
 
 const logger = createLogger('xo:xo-server-backup-reports')
 
@@ -53,28 +51,7 @@ export const testSchema = {
 
 // ===================================================================
 
-const handlebarsPartialFiles = readdirSync(join(__dirname, '../templates/partials/')).filter(
-  filename => extname(filename) === '.hbs'
-)
-for (const fileName of handlebarsPartialFiles) {
-  const partial = readFileSync(join(__dirname, `../templates/partials/${fileName}`)).toString()
-  Handlebars.registerPartial(parse(fileName).name, partial)
-}
-
-const compiledMetadataSubject = Handlebars.compile(
-  readFileSync(join(__dirname, '../templates/metadataSubject.hbs')).toString().replace(/\n$/, '')
-)
-const compiledMetadataTemplate = Handlebars.compile(
-  readFileSync(join(__dirname, '../templates/metadata.hbs')).toString().replace(/\n$/, '')
-)
-const compiledVmSubject = Handlebars.compile(
-  readFileSync(join(__dirname, '../templates/vmSubject.hbs')).toString().replace(/\n$/, '')
-)
-const compiledVmTemplate = Handlebars.compile(
-  readFileSync(join(__dirname, '../templates/vm.hbs')).toString().replace(/\n$/, '')
-)
-
-// ===================================================================
+const DEFAULT_TEMPLATE = 'mjml'
 
 const UNKNOWN_ITEM = 'Unknown'
 
@@ -88,7 +65,7 @@ const noop = Function.prototype
 
 const UNHEALTHY_VDI_CHAIN_ERROR = 'unhealthy VDI chain'
 const UNHEALTHY_VDI_CHAIN_MESSAGE =
-  '[(unhealthy VDI chain) Job canceled to protect the VDI chain](https://xen-orchestra.com/docs/backup_troubleshooting.html#vdi-chain-protection)'
+  '(unhealthy VDI chain) Job canceled to protect the VDI chain. See https://xen-orchestra.com/docs/backup_troubleshooting.html#vdi-chain-protection'
 
 const getAdditionnalData = async (task, props) => {
   if (task.data?.type === 'remote') {
@@ -157,7 +134,8 @@ class BackupReportsXoPlugin {
         // Handle improper value introduced by:
         // https://github.com/vatesfr/xen-orchestra/commit/753ee994f2948bbaca9d3161eaab82329a682773#diff-9c044ab8a42ed6576ea927a64c1ec3ebR105
         reportWhen === 'Never' ||
-        (reportWhen === 'failure' && log.status === 'success'))
+        (reportWhen === 'failure' && log.status === 'success') ||
+        (reportWhen === 'error' && (log.status === 'success' || log.status === 'skipped')))
     ) {
       return
     }
@@ -178,10 +156,12 @@ class BackupReportsXoPlugin {
     throw new Error(`Unknown backup job type: ${job.type}`)
   }
 
-  async _metadataHandler(log, { name: jobName }, schedule, force) {
+  async _metadataHandler(log, { name: jobName, settings }, schedule, force) {
     const xo = this._xo
 
     const formatDate = createDateFormatter(schedule?.timezone)
+
+    const mailReceivers = get(() => settings[''].reportRecipients)
 
     const tasksByStatus = groupBy(log.tasks, 'status')
 
@@ -192,8 +172,12 @@ class BackupReportsXoPlugin {
     for (const taskBatch of Object.values(tasksByStatus)) {
       for (const task of taskBatch) {
         task.additionnalData = await getAdditionnalData(task, { xo })
-        for (const subTask of task.tasks) {
-          subTask.additionnalData = await getAdditionnalData(subTask, { xo })
+
+        const subTasks = task.tasks
+        if (subTasks !== undefined) {
+          for (const subTask of subTasks) {
+            subTask.additionnalData = await getAdditionnalData(subTask, { xo })
+          }
         }
       }
     }
@@ -206,9 +190,13 @@ class BackupReportsXoPlugin {
       formatDate,
     }
 
+    const backupReportTpl = log.data?.backupReportTpl ?? DEFAULT_TEMPLATE
     return this._sendReport({
-      subject: compiledMetadataSubject(context),
-      markdown: compiledMetadataTemplate(context),
+      ...(await templates.markdown.transform(templates.markdown.$metadata(context))),
+      ...(await templates.compactMarkdown.transform(templates.compactMarkdown.$metadata(context))),
+      ...(await templates[backupReportTpl].transform(templates[backupReportTpl].$metadata(context))),
+      mailReceivers,
+      subject: templates.mjml.$metadataSubject(context),
       success: log.status === 'success',
     })
   }
@@ -383,15 +371,18 @@ class BackupReportsXoPlugin {
       globalTransferSize,
     }
 
+    const backupReportTpl = log.data?.backupReportTpl ?? DEFAULT_TEMPLATE
     return this._sendReport({
+      ...(await templates.markdown.transform(templates.markdown.$vm(context))),
+      ...(await templates.compactMarkdown.transform(templates.compactMarkdown.$vm(context))),
+      ...(await templates[backupReportTpl].transform(templates[backupReportTpl].$vm(context))),
       mailReceivers,
-      markdown: compiledVmTemplate(context),
-      subject: compiledVmSubject(context),
+      subject: templates.mjml.$vmSubject(context),
       success: log.status === 'success',
     })
   }
 
-  async _sendReport({ mailReceivers, markdown, subject, success }) {
+  async _sendReport({ mailReceivers, markdown, compactMarkdown, html, subject, success }) {
     if (mailReceivers === undefined || mailReceivers.length === 0) {
       mailReceivers = this._mailsReceivers
     }
@@ -404,23 +395,24 @@ class BackupReportsXoPlugin {
           : xo.sendEmail({
               to: mailReceivers,
               subject,
-              markdown,
+              html,
+              text: markdown,
             })),
       this._xmppReceivers !== undefined &&
         (xo.sendEmail === undefined
           ? Promise.reject(new Error('transport-xmpp plugin not enabled'))
           : xo.sendToXmppClient({
               to: this._xmppReceivers,
-              message: markdown,
+              message: compactMarkdown,
             })),
       xo.sendSlackMessage !== undefined &&
         xo.sendSlackMessage({
-          message: markdown,
+          message: compactMarkdown,
         }),
       xo.sendIcinga2Status !== undefined &&
         xo.sendIcinga2Status({
           status: success ? 'OK' : 'CRITICAL',
-          message: markdown,
+          message: compactMarkdown,
         }),
     ]
 

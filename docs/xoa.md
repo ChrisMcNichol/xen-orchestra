@@ -112,13 +112,13 @@ After the VM is imported, you just need to start it with `xe vm-start vm="XOA"` 
 
 ## First console connection
 
-### Deployed with the [web deploy form](https://xen-orchestra.com/#!/xoa)
+### Deployed with the [web deploy form](https://vates.tech/deploy/)
 
 In that case, you already set the password for `xoa` user. If you forgot it, see below.
 
 ### Manually deployed
 
-If you connect via SSH or console for the first time without using our [web deploy form](https://xen-orchestra.com/#!/xoa), be aware **there is NO default password set for security reasons**. To set it, you need to connect to your host to find the XOA VM UUID (eg via `xe vm-list`).
+If you connect via SSH or console for the first time without using our [web deploy form](https://vates.tech/deploy/), be aware **there is NO default password set for security reasons**. To set it, you need to connect to your host to find the XOA VM UUID (eg via `xe vm-list`).
 
 Next, you can replace `<UUID>` with the UUID you found previously, and `<password>` with your password:
 
@@ -158,8 +158,7 @@ XOA uses **DHCP** by default, so if you need to configure the IP address, please
 
 ```console
 $ xoa network static
-? Static IP for this machine 192.168.100.120
-? Network mask (eg 255.255.255.0) 255.255.255.0
+? Static IP for this machine 192.168.100.120/24
 ? Gateway 192.168.100.254
 ? IP of the DNS server 192.168.100.254
 ```
@@ -180,6 +179,15 @@ $ xoa network static enX1
 ? Network mask (eg 255.255.255.0) 255.255.255.0
 
 $ xoa network dhcp enX1
+```
+
+## Secondary IP addresses
+
+To add more IP addresses on an already configured interface, you can use the `--add` flag:
+
+```
+$ xoa network static --add
+? Static IP for this machine 192.168.200.120/24
 ```
 
 ## Firewall

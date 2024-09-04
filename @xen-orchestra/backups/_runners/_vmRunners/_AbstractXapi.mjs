@@ -4,11 +4,18 @@ import ignoreErrors from 'promise-toolbox/ignoreErrors'
 import { asyncMap } from '@xen-orchestra/async-map'
 import { decorateMethodsWith } from '@vates/decorate-with'
 import { defer } from 'golike-defer'
-import { formatDateTime } from '@xen-orchestra/xapi'
 
 import { getOldEntries } from '../../_getOldEntries.mjs'
 import { Task } from '../../Task.mjs'
 import { Abstract } from './_Abstract.mjs'
+import {
+  DATETIME,
+  JOB_ID,
+  SCHEDULE_ID,
+  populateVdisOtherConfig,
+  resetVmOtherConfig,
+  setVmOtherConfig,
+} from '../../_otherConfig.mjs'
 
 export const AbstractXapi = class AbstractXapiVmBackupRunner extends Abstract {
   constructor({
@@ -25,7 +32,7 @@ export const AbstractXapi = class AbstractXapiVmBackupRunner extends Abstract {
     vm,
   }) {
     super()
-    if (vm.other_config['xo:backup:job'] === job.id && 'start' in vm.blocked_operations) {
+    if (vm.other_config[JOB_ID] === job.id && 'start' in vm.blocked_operations) {
       // don't match replicated VMs created by this very job otherwise they
       // will be replicated again and again
       throw new Error('cannot backup a VM created by this very job')
@@ -49,17 +56,17 @@ export const AbstractXapi = class AbstractXapiVmBackupRunner extends Abstract {
     this._exportedVm = undefined
     this._vm = vm
 
-    this._fullVdisRequired = undefined
+    this._baseVdis = undefined
     this._getSnapshotNameLabel = getSnapshotNameLabel
     this._isIncremental = job.mode === 'delta'
     this._healthCheckSr = healthCheckSr
     this._jobId = job.id
-    this._jobSnapshots = undefined
+    this._jobSnapshotVdis = undefined
     this._throttleStream = throttleStream
     this._xapi = vm.$xapi
 
     // Base VM for the export
-    this._baseVm = undefined
+    this._baseVdis = undefined
 
     // Settings for this specific run (job, schedule, VM)
     if (tags.includes('xo-memory-backup')) {
@@ -123,15 +130,8 @@ export const AbstractXapi = class AbstractXapiVmBackupRunner extends Abstract {
   // copied on manual snapshots and interfere with the backup jobs
   async _cleanMetadata() {
     const vm = this._vm
-    if ('xo:backup:job' in vm.other_config) {
-      await vm.update_other_config({
-        'xo:backup:datetime': null,
-        'xo:backup:deltaChainLength': null,
-        'xo:backup:exported': null,
-        'xo:backup:job': null,
-        'xo:backup:schedule': null,
-        'xo:backup:vm': null,
-      })
+    if (JOB_ID in vm.other_config) {
+      await resetVmOtherConfig(this._xapi, vm.$ref)
     }
   }
 
@@ -146,23 +146,29 @@ export const AbstractXapi = class AbstractXapiVmBackupRunner extends Abstract {
         if (!settings.bypassVdiChainsCheck) {
           await vm.$assertHealthyVdiChains()
         }
+        if (settings.preferNbd) {
+          try {
+            // enable CBT on all disks if possible
+            const diskRefs = await xapi.VM_getDisks(vm.$ref)
+            await Promise.all(diskRefs.map(diskRef => xapi.call('VDI.enable_cbt', diskRef)))
+          } catch (error) {
+            Task.info(`couldn't enable CBT`, error)
+          }
+        }
 
         const snapshotRef = await vm[settings.checkpointSnapshot ? '$checkpoint' : '$snapshot']({
-          ignoreNobakVdis: true,
+          ignoredVdisTag: '[NOBAK]',
           name_label: this._getSnapshotNameLabel(vm),
           unplugVusbs: true,
         })
         this.timestamp = Date.now()
-
-        await xapi.setFieldEntries('VM', snapshotRef, 'other_config', {
-          'xo:backup:datetime': formatDateTime(this.timestamp),
-          'xo:backup:job': this._jobId,
-          'xo:backup:schedule': this.scheduleId,
-          'xo:backup:vm': vm.uuid,
+        await setVmOtherConfig(xapi, snapshotRef, {
+          timestamp: this.timestamp,
+          jobId: this._jobId,
+          scheduleId: this.scheduleId,
+          vmUuid: vm.uuid,
         })
-
         this._exportedVm = await xapi.getRecord('VM', snapshotRef)
-
         return this._exportedVm.uuid
       })
     } else {
@@ -176,38 +182,121 @@ export const AbstractXapi = class AbstractXapiVmBackupRunner extends Abstract {
     const vmRef = this._vm.$ref
     const xapi = this._xapi
 
-    const snapshotsRef = await xapi.getField('VM', vmRef, 'snapshots')
-    const snapshotsOtherConfig = await asyncMap(snapshotsRef, ref => xapi.getField('VM', ref, 'other_config'))
+    // to ensure compatibility with snapshots older than CBT implementation
+    // update vdi data to ensure the vdi are correctly fetched in _jobSnapshotVdis
+    // remove by then end of 2024
+    const vmSnapshotsRef = await xapi.getField('VM', vmRef, 'snapshots')
+    const vmSnapshotsOtherConfig = await asyncMap(vmSnapshotsRef, ref => xapi.getField('VM', ref, 'other_config'))
 
-    const snapshots = []
-    snapshotsOtherConfig.forEach((other_config, i) => {
-      if (other_config['xo:backup:job'] === jobId) {
-        snapshots.push({ other_config, $ref: snapshotsRef[i] })
+    const vmSnapshots = []
+    vmSnapshotsOtherConfig.forEach((other_config, i) => {
+      if (other_config[JOB_ID] === jobId) {
+        vmSnapshots.push({ other_config, $ref: vmSnapshotsRef[i] })
       }
     })
-    snapshots.sort((a, b) => (a.other_config['xo:backup:datetime'] < b.other_config['xo:backup:datetime'] ? -1 : 1))
-    this._jobSnapshots = snapshots
+    await Promise.all(vmSnapshots.map(snapshot => populateVdisOtherConfig(xapi, snapshot.$ref)))
+    // end of compatibiliy handling
+
+    // handle snapshot by VDI
+    this._jobSnapshotVdis = []
+    const srcVdis = await xapi.getRecords('VDI', await this._vm.$getDisks())
+    for (const srcVdi of srcVdis) {
+      const snapshots = await xapi.getRecords('VDI', srcVdi.snapshots)
+      for (const snapshot of snapshots) {
+        if (snapshot.other_config[JOB_ID] === jobId) {
+          this._jobSnapshotVdis.push(snapshot)
+        }
+      }
+    }
   }
 
   async _removeUnusedSnapshots() {
     const allSettings = this.job.settings
     const baseSettings = this._baseSettings
-    const baseVmRef = this._baseVm?.$ref
 
-    const snapshotsPerSchedule = groupBy(this._jobSnapshots, _ => _.other_config['xo:backup:schedule'])
     const xapi = this._xapi
-    await asyncMap(Object.entries(snapshotsPerSchedule), ([scheduleId, snapshots]) => {
+    // ensure all the event has been processed by the xapi
+    await xapi.barrier()
+    // ensure cached object are up to date
+    this._jobSnapshotVdis = this._jobSnapshotVdis.map(vdi => xapi.getObject(vdi.$ref))
+    const snapshotsPerSchedule = groupBy(this._jobSnapshotVdis, _ => _.other_config[SCHEDULE_ID])
+    await asyncMap(Object.entries(snapshotsPerSchedule), async ([scheduleId, snapshots]) => {
+      const snapshotPerDatetime = groupBy(snapshots, _ => _.other_config[DATETIME])
+
+      const datetimes = Object.keys(snapshotPerDatetime)
+      datetimes.sort()
+
       const settings = {
         ...baseSettings,
         ...allSettings[scheduleId],
         ...allSettings[this._vm.uuid],
       }
-      return asyncMap(getOldEntries(settings.snapshotRetention, snapshots), ({ $ref }) => {
-        if ($ref !== baseVmRef) {
-          return xapi.VM_destroy($ref)
+      // ensure we never delete the last one for delta
+      const minRetention = this.job.mode === 'delta' ? 1 : 0
+      const retention = Math.max(settings.snapshotRetention ?? 0, minRetention)
+      await asyncMap(getOldEntries(retention, datetimes), async datetime => {
+        const vdis = snapshotPerDatetime[datetime]
+        let vmRef
+        // if there is an attached VM => destroy the VM (Non CBT backups)
+        for (const vdi of vdis) {
+          const vbds = vdi.$VBDs.filter(({ $VM }) => $VM.is_control_domain === false)
+          if (vbds.length > 0) {
+            // only one VM linked to this vdi
+            // this will throw error for VDI still attached to control domain
+            assert.strictEqual(vbds.length, 1, 'VDI must be free or attached to exactly one VM')
+            const vm = vbds[0].$VM
+            assert.strictEqual(vm.is_a_snapshot, true, `VM must be a snapshot`) // don't delete a VM (especially a control domain)
+
+            const vmRefVdi = vm.$ref
+            // same vm than other vdi of the same batch
+            assert.ok(
+              vmRef === undefined || vmRef === vmRefVdi,
+              '_removeUnusedSnapshots don t handle vdi related to multiple VMs '
+            )
+            vmRef = vmRefVdi
+          }
+        }
+        if (vmRef !== undefined) {
+          return xapi.VM_destroy(vmRef)
+        } else {
+          return asyncMap(
+            vdis.map(async ({ $ref }) => {
+              await xapi.VDI_destroy($ref)
+            })
+          )
         }
       })
     })
+  }
+
+  async _removeSnapshotData() {
+    // now that we use CBT, we can destroy the data of the snapshot used for this backup
+    // going back to a previous version of XO not supporting CBT will create a full backup
+    // this will only do something after snapshot and transfer
+    if (
+      // don't modify the VM
+      this._exportedVm?.is_a_snapshot &&
+      // user don't want to keep the snapshot data
+      this._settings.snapshotRetention === 0 &&
+      // preferNbd is not a guarantee that the backup used NBD, depending on the network configuration,
+      // in that case next runs will be full, but there is not an easy way to prevent that
+      this._settings.preferNbd &&
+      // only delete snapshost data if the config allows it
+      this._settings.cbtDestroySnapshotData
+    ) {
+      Task.info('will delete snapshot data')
+      const vdiRefs = await this._xapi.VM_getDisks(this._exportedVm.$ref)
+      await this._xapi.call('VM.destroy', this._exportedVm.$ref)
+      for (const vdiRef of vdiRefs) {
+        try {
+          // data_destroy will fail with a VDI_NO_CBT_METADATA error if CBT is not enabled on this VDI
+          await this._xapi.call('VDI.data_destroy', vdiRef)
+          Task.info(`Snapshot data has been deleted`, { vdiRef })
+        } catch (error) {
+          Task.warning(`Couldn't deleted snapshot data`, { error, vdiRef })
+        }
+      }
+    }
   }
 
   async copy() {
@@ -249,15 +338,22 @@ export const AbstractXapi = class AbstractXapiVmBackupRunner extends Abstract {
       const reason = 'VM migration is blocked during backup'
       await vm.update_blocked_operations({ pool_migrate: reason, migrate_send: reason })
 
-      $defer(() =>
+      $defer(async () => {
         // delete the entries if they did not exist previously or if they were
         // equal to reason (which happen if a previous backup was interrupted
         // before resetting them)
-        vm.update_blocked_operations({
+        await vm.update_blocked_operations({
           migrate_send: migrate_send === undefined || migrate_send === reason ? null : migrate_send,
           pool_migrate: pool_migrate === undefined || pool_migrate === reason ? null : pool_migrate,
         })
-      )
+
+        // 2024-08-19 - Work-around a XAPI bug where allowed_operations are not properly computed when blocked_operations is updated
+        //
+        // this is a problem because some clients (e.g. XenCenter) use this field to allow operations.
+        //
+        // internal source: https://team.vates.fr/vates/pl/mjmxnce9qfdx587r3qpe4z91ho
+        await vm.$call('update_allowed_operations')
+      })
     }
 
     await this._fetchJobSnapshots()
@@ -289,6 +385,7 @@ export const AbstractXapi = class AbstractXapiVmBackupRunner extends Abstract {
 
       await this._fetchJobSnapshots()
       await this._removeUnusedSnapshots()
+      await this._removeSnapshotData()
     }
     await this._healthCheck()
   }

@@ -1,25 +1,30 @@
 <template>
   <div
-    v-tooltip="{ selector: '.ellipsis' }"
+    v-tooltip="{ selector: '.text-ellipsis' }"
     :class="color"
     :style="{ width: percentage + '%' }"
     class="stacked-bar-segment typo c4-semi-bold"
   >
-    <div ref="ellipsisElement" :class="{ hidden }" class="ellipsis">{{ percentage.toFixed(0) }} %</div>
+    <div ref="ellipsisElement" :class="{ hidden }" class="text-ellipsis">
+      {{ $n(percentage / 100, 'percent') }}
+    </div>
   </div>
 </template>
 
 <script lang="ts" setup>
 import { vTooltip } from '@core/directives/tooltip.directive'
-import type { Color } from '@core/types/color.type'
 import { hasEllipsis } from '@core/utils/has-ellipsis.util'
 import { useResizeObserver } from '@vueuse/core'
 import { ref } from 'vue'
 
-defineProps<{
-  color: Color
+export type StackedBarSegmentColor = 'primary' | 'success' | 'warning' | 'danger'
+
+export type StackedBarSegmentProps = {
+  color: StackedBarSegmentColor
   percentage: number
-}>()
+}
+
+defineProps<StackedBarSegmentProps>()
 
 const hidden = ref(false)
 const ellipsisElement = ref<HTMLElement | null>(null)
@@ -32,7 +37,7 @@ useResizeObserver(ellipsisElement, ([entry]) => {
 <style lang="postcss" scoped>
 /* COLOR VARIANT */
 .stacked-bar-segment {
-  &.info {
+  &.primary {
     --background-color: var(--color-purple-base);
   }
 
@@ -44,7 +49,7 @@ useResizeObserver(ellipsisElement, ([entry]) => {
     --background-color: var(--color-orange-base);
   }
 
-  &.error {
+  &.danger {
     --background-color: var(--color-red-base);
   }
 }
@@ -57,12 +62,6 @@ useResizeObserver(ellipsisElement, ([entry]) => {
   white-space: nowrap;
   color: var(--color-grey-600);
   background-color: var(--background-color);
-}
-
-.ellipsis {
-  overflow: hidden;
-  white-space: nowrap;
-  min-width: 0;
 }
 
 .hidden {

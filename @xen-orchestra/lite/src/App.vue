@@ -4,7 +4,7 @@
   </div>
   <div v-else>
     <AppHeader v-if="uiStore.hasUi" />
-    <div style="display: flex">
+    <div class="container">
       <AppNavigation v-if="uiStore.hasUi" />
       <main class="main" :class="{ 'no-ui': !uiStore.hasUi }">
         <RouterView />
@@ -19,13 +19,13 @@
 import AppHeader from '@/components/AppHeader.vue'
 import AppLogin from '@/components/AppLogin.vue'
 import AppNavigation from '@/components/AppNavigation.vue'
-import { usePoolStore } from '@/stores/xen-api/pool.store'
-import TooltipList from '@core/components/tooltip/TooltipList.vue'
 import ModalList from '@/components/ui/modals/ModalList.vue'
 import { useChartTheme } from '@/composables/chart-theme.composable'
 import { useUnreachableHosts } from '@/composables/unreachable-hosts.composable'
-import { useUiStore } from '@core/stores/ui.store'
+import { usePoolStore } from '@/stores/xen-api/pool.store'
 import { useXenApiStore } from '@/stores/xen-api.store'
+import TooltipList from '@core/components/tooltip/TooltipList.vue'
+import { useUiStore } from '@core/stores/ui.store'
 import { useActiveElement, useMagicKeys, whenever } from '@vueuse/core'
 import { logicAnd } from '@vueuse/math'
 import { computed } from 'vue'
@@ -67,6 +67,10 @@ useUnreachableHosts()
 </script>
 
 <style lang="postcss" scoped>
+.container {
+  display: flex;
+}
+
 .main {
   overflow: auto;
   flex: 1;

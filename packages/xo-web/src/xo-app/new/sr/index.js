@@ -54,8 +54,8 @@ class SelectScsiId extends Component {
   _getOptions = createSelector(
     () => this.props.options,
     options =>
-      map(options, ({ id, path, scsiId, serial, size, vendor }) => ({
-        label: `${vendor} ${id}: ${serial} - ${path} (${formatSize(size)})`,
+      map(options, ({ id, path, scsiId, size, vendor, lun }) => ({
+        label: `${vendor} ${id}: ${scsiId} - LUN: ${lun} - ${path} (${formatSize(size)})`,
         value: scsiId,
       }))
   )
@@ -234,7 +234,7 @@ export default class New extends Component {
     () => this.props.srs,
     createSelector(
       () => this.state.host,
-      host => host !== undefined && (sr => sr.$container === host.$pool || sr.$container === host.id)
+      host => host != null && (sr => sr.$container === host.$pool || sr.$container === host.id)
     )
   )
 
@@ -369,6 +369,18 @@ export default class New extends Component {
         await confirm({
           title: _('newSr'),
           body: <p>{_('newSrConfirm', { name: device.value })}</p>,
+        })
+      }
+      const existingSrsLength = this.state.existingSrs?.length ?? 0
+      // `existingsSrs` is defined if the SR type is `NFS` or `ISCSI` and if at least one SR is detected
+      // Ignore NFS type because it is not supposed to erase data
+      if (type !== 'nfs' && existingSrsLength !== 0 && srUuid === undefined) {
+        await confirm({
+          title: _('newSr'),
+          body: _('newSrExistingSr', { path: <b>{this.state.path}</b>, n: existingSrsLength }),
+          strongConfirm: {
+            messageId: 'newSrTitle',
+          },
         })
       }
       return await createMethodFactories[type]()

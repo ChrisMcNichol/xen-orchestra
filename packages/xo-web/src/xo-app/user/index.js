@@ -586,11 +586,13 @@ export default class User extends Component {
                 <option value='en'>English</option>
                 <option value='ru'>Русский</option>
                 <option value='es'>Español</option>
+                <option value='fa'>Persian</option>
                 <option value='fr'>Français</option>
                 <option value='hu'>Magyar</option>
                 <option value='it'>Italiano</option>
                 <option value='pl'>Polski</option>
                 <option value='pt'>Português</option>
+                <option value='se'>Svenska</option>
                 <option value='tr'>Türkçe</option>
                 <option value='he'>עברי</option>
                 <option value='zh'>简体中文</option>

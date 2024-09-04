@@ -17,7 +17,7 @@ import tarStream from 'tar-stream'
 import uniq from 'lodash/uniq.js'
 import { asyncMap } from '@xen-orchestra/async-map'
 import { vmdkToVhd, vhdToVMDK, writeOvaOn } from 'xo-vmdk-to-vhd'
-import { cancelable, CancelToken, fromEvents, ignoreErrors, pCatch, pRetry } from 'promise-toolbox'
+import { cancelable, CancelToken, fromEvents, ignoreErrors, pRetry } from 'promise-toolbox'
 import { createLogger } from '@xen-orchestra/log'
 import { decorateWith } from '@vates/decorate-with'
 import { defer as deferrable } from 'golike-defer'
@@ -605,14 +605,33 @@ export default class Xapi extends XapiBase {
     ]
 
     if (!bypassAssert) {
-      await this.callAsync('VM.assert_can_migrate', ...params)
+      try {
+        await this.callAsync('VM.assert_can_migrate', ...params)
+      } catch (err) {
+        if (err.code !== 'VDI_CBT_ENABLED') {
+          // cbt disabling is handled later, by the migrate_end call
+          throw err
+        }
+      }
     }
-
-    const loop = () =>
-      this.callAsync('VM.migrate_send', ...params)::pCatch({ code: 'TOO_MANY_STORAGE_MIGRATES' }, () =>
-        pDelay(1e4).then(loop)
-      )
-
+    const loop = async () => {
+      try {
+        await this.callAsync('VM.migrate_send', ...params)
+      } catch (err) {
+        if (err.code === 'VDI_CBT_ENABLED') {
+          // as of 20240619, CBT must be disabled on all disks to allow migration to go through
+          // it will be re enabled if needed by backups
+          // the next backup after a storage migration will be a full backup
+          await this.VM_disableChangedBlockTracking(vm.$ref)
+          return loop()
+        }
+        if (err.code === 'TOO_MANY_STORAGE_MIGRATES') {
+          await pDelay(1e4)
+          return loop()
+        }
+        throw err
+      }
+    }
     return loop().then(noop)
   }
 
@@ -1016,7 +1035,7 @@ export default class Xapi extends XapiBase {
     return this.callAsync('VDI.clone', vdi.$ref)
   }
 
-  async moveVdi(vdiId, srId) {
+  async moveVdi(vdiId, srId, { _failOnCbtError = false } = {}) {
     const vdi = this.getObject(vdiId)
     const sr = this.getObject(srId)
 
@@ -1033,6 +1052,34 @@ export default class Xapi extends XapiBase {
       )
     } catch (error) {
       const { code } = error
+      if (code === 'VDI_CBT_ENABLED' && !_failOnCbtError) {
+        log.debug(`${vdi.name_label} has CBT enabled`)
+        // disks attached to dom0 are a xapi internal
+        // it can be, for example, during an export
+        // we shouldn't consider these VBDs are relevant here
+        const vbds = vdi.$VBDs.filter(({ $VM }) => $VM.is_control_domain === false)
+        if (vbds.length === 0) {
+          log.debug(`will disable CBT on ${vdi.name_label}  `)
+          await this.call('VDI.disable_cbt', vdi.$ref)
+        } else {
+          if (vbds.length > 1) {
+            // no implicit workaround if vdi is attached to multiple VMs
+            throw error
+          }
+          // 20240629 we need to disable CBT on all disks of the VM since the xapi
+          // checks all disk of a VM even to migrate only one disk
+          const vbd = vbds[0]
+          log.debug(`will disable CBT on the full VM ${vbd.$VM.name_label}, containing disk ${vdi.name_label}  `)
+          await this.VM_disableChangedBlockTracking(vbd.VM)
+        }
+
+        // cbt will be re enabled when needed on next backup
+        // after a migration the next delta backup is always a base copy
+        // and this will only enabled cbt on needed disks
+
+        // retry migrating disk
+        return this.moveVdi(vdiId, srId, { _failOnCbtError: true })
+      }
       if (code !== 'NO_HOSTS_AVAILABLE' && code !== 'LICENCE_RESTRICTION' && code !== 'VDI_NEEDS_VM_FOR_MIGRATE') {
         throw error
       }
@@ -1428,16 +1475,16 @@ export default class Xapi extends XapiBase {
   }
 
   async isHyperThreadingEnabled(hostId) {
+    const host = this.getObject(hostId)
+
+    // For XCP-ng >=8.3, data is already available in XAPI
+    const { threads_per_core } = host.cpu_info
+    if (threads_per_core !== undefined) {
+      return threads_per_core > 1
+    }
+
     try {
-      return (
-        (await this.call(
-          'host.call_plugin',
-          this.getObject(hostId).$ref,
-          'hyperthreading.py',
-          'get_hyperthreading',
-          {}
-        )) !== 'false'
-      )
+      return (await this.call('host.call_plugin', host.$ref, 'hyperthreading.py', 'get_hyperthreading', {})) !== 'false'
     } catch (error) {
       if (error.code === 'XENAPI_MISSING_PLUGIN' || error.code === 'UNKNOWN_XENAPI_PLUGIN_FUNCTION') {
         return null

@@ -1,3 +1,4 @@
+import TTLCache from '@isaacs/ttlcache'
 import { asyncMap } from '@xen-orchestra/async-map'
 import { createLogger } from '@xen-orchestra/log'
 import { format } from 'json-rpc-peer'
@@ -9,6 +10,11 @@ import backupGuard from './_backupGuard.mjs'
 import { moveFirst } from '../_moveFirst.mjs'
 
 const log = createLogger('xo:api:pool')
+
+const TTL_CACHE = 3e4
+const CACHE = new TTLCache({
+  ttl: TTL_CACHE,
+})
 
 // ===================================================================
 
@@ -234,8 +240,7 @@ export const rollingUpdate = async function ({ bypassBackupCheck = false, pool }
     await backupGuard.call(this, poolId)
   }
 
-  const task = this.tasks.create({ name: `Rolling pool update`, poolId, poolName: pool.name_label })
-  return task.run(async () => this.rollingPoolUpdate(pool))
+  await this.rollingPoolUpdate(pool)
 }
 
 rollingUpdate.params = {
@@ -259,8 +264,8 @@ export async function rollingReboot({ bypassBackupCheck, pool }) {
   } else {
     await backupGuard.call(this, poolId)
   }
-  const task = this.tasks.create({ name: `Rolling pool reboot`, poolId, poolName: pool.name_label })
-  return task.run(async () => this.rollingPoolReboot(pool))
+
+  await this.rollingPoolReboot(pool)
 }
 
 rollingReboot.params = {
@@ -331,6 +336,29 @@ getLicenseState.params = {
 
 getLicenseState.resolve = {
   pool: ['pool', 'pool', 'administrate'],
+}
+
+// -------------------------------------------------------------------
+
+export async function getGuestSecureBootReadiness({ pool, forceRefresh }) {
+  const xapi = this.getXapi(pool)
+  const poolRef = pool._xapiRef
+  const xapiMethodName = 'pool.get_guest_secureboot_readiness'
+
+  if (forceRefresh) {
+    CACHE.delete(xapi.computeCacheKey(xapiMethodName, poolRef))
+  }
+
+  return xapi.call(CACHE, xapiMethodName, poolRef)
+}
+
+getGuestSecureBootReadiness.params = {
+  id: { type: 'string' },
+  forceRefresh: { type: 'boolean', default: false },
+}
+
+getGuestSecureBootReadiness.resolve = {
+  pool: ['id', 'pool', null],
 }
 
 // -------------------------------------------------------------------

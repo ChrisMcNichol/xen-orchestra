@@ -8,12 +8,12 @@
 </template>
 
 <script lang="ts" setup>
-import { computed } from 'vue'
-import { usePoolStore } from '@/stores/xen-api/pool.store'
-import { useRouter } from 'vue-router'
-import { faDownload, faArrowUpRightFromSquare } from '@fortawesome/free-solid-svg-icons'
-import UiButton from '@core/components/button/UiButton.vue'
 import type { PRIMARY_ADDRESS_TYPE } from '@/libs/xen-api/xen-api.enums'
+import { usePoolStore } from '@/stores/xen-api/pool.store'
+import UiButton from '@core/components/button/UiButton.vue'
+import { faDownload, faArrowUpRightFromSquare } from '@fortawesome/free-solid-svg-icons'
+import { computed } from 'vue'
+import { useRouter } from 'vue-router'
 
 const router = useRouter()
 const { pool } = usePoolStore().subscribe()
@@ -30,7 +30,8 @@ interface InterfaceInfo {
 
 interface ClientInfo {
   lastConnected: number
-  networkInterfaces: Record<string, InterfaceInfo[]>
+  networkInterfaces?: Record<string, InterfaceInfo[]>
+  publicUrl?: string
 }
 
 const xoasInfo = computed(() => {
@@ -60,7 +61,12 @@ const xoaAddress = computed(() => {
     return
   }
 
-  const { networkInterfaces } = xoaInfo.value
+  const { networkInterfaces, publicUrl } = xoaInfo.value
+
+  if (publicUrl !== undefined) {
+    return publicUrl
+  }
+
   if (networkInterfaces === undefined || Object.keys(networkInterfaces).length === 0) {
     return
   }

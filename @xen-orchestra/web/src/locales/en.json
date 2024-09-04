@@ -1,9 +1,47 @@
 {
-  "account-organization-more": "Account, organization & more...",
-  "documentation-name": "{name} documentation",
-  "power-on-for-console": "Power on your VM to access its console",
-  "support-name": "{name} pro support",
-  "tasks": {
-    "quick-view": "Tasks' quick view (coming soon)"
-  }
+  "account-organization-more": "Account, organization & more…",
+  "available": "Available",
+  "backups": "Backups",
+  "backup-repository": "Backup repository (local, NFS)",
+
+  "backups.jobs": "Jobs",
+  "backups.jobs.at-least-one-skipped": "At least one skipped",
+  "backups.jobs.based-on-last-three": "Based on the last three jobs",
+  "backups.jobs.disabled": "Disabled",
+  "backups.jobs.looks-like-issue": "Looks like there is an issue",
+  "backups.jobs.running-good": "Running good",
+
+  "end-of-life": "End of life",
+  "eol": "EOL",
+  "for-backup": "For backup",
+  "for-replication": "For replication",
+  "host": "Host",
+  "host-description": "Host description",
+
+  "hosts-status": "Hosts status",
+  "hosts-status.halted": "Stopped",
+  "hosts-status.running": "Running",
+  "hosts-status.unknown": "Unknown",
+  "hosts-status.unknown.tooltip": "Hosts metrics are unavailable",
+
+  "missing-patches": "Missing patches",
+  "n-hosts": "1 host | {n} hosts",
+  "no-results": "No results",
+  "pools": "Pools",
+  "storage-repository": "Storage repository",
+
+  "sidebar.search-tree-view": "Search in treeview",
+  "sidebar.vms-treeview": "VMs treeview",
+
+  "up-to-date": "Up-to-date",
+  "used": "Used",
+  "vm": "VM",
+  "vm-description": "VM description",
+
+  "vms-status": "VMs status",
+  "vms-status.inactive": "Inactive",
+  "vms-status.inactive.tooltip": "Halted or suspended",
+  "vms-status.running": "Running",
+  "vms-status.unknown": "Unknown",
+  "vms-status.unknown.tooltip": "For which XO has lost connection to the pool"
 }

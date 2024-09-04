@@ -11,7 +11,7 @@
       {{ $t('send-us-feedback') }}
     </MenuItem>
     <MenuItem :icon="faArrowRightFromBracket" class="menu-item-logout" @click="logout">
-      {{ $t('core.log-out') }}
+      {{ $t('log-out') }}
     </MenuItem>
   </MenuList>
 </template>
@@ -46,7 +46,7 @@ const openFeedbackUrl = () => {
 const openSettings = () => router.push({ name: 'settings' })
 </script>
 
-<style scoped>
+<style lang="postcss" scoped>
 .account-button {
   display: flex;
   align-items: center;

@@ -10,7 +10,7 @@
       class="progress-item"
     >
       <UiProgressBar :value="item.value" color="custom" />
-      <UiProgressLegend :label="item.label" :value="item.badgeLabel ?? `${item.value}%`" />
+      <UiProgressLegend :label="item.label" :value="item.badgeLabel ?? $n(item.value / 100, 'percent')" />
     </div>
     <slot :total-percent="computedData.totalPercentUsage" name="footer" />
   </div>
@@ -27,10 +27,10 @@ interface Props {
   nItems?: number
 }
 
+const props = defineProps<Props>()
+
 const MIN_WARNING_VALUE = 80
 const MIN_DANGEROUS_VALUE = 90
-
-const props = defineProps<Props>()
 
 const computedData = computed(() => {
   const _data = props.data

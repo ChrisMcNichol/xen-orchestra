@@ -145,6 +145,7 @@ const normalizeSettings = ({ copyMode, exportMode, offlineBackupActive, settings
     defined(setting.copyRetention, setting.exportRetention, setting.snapshotRetention) !== undefined
       ? {
           ...setting,
+          cbtDestroySnapshotData: undefined,
           copyRetention: copyMode ? setting.copyRetention : undefined,
           exportRetention: exportMode ? setting.exportRetention : undefined,
           snapshotRetention: snapshotMode && !offlineBackupActive ? setting.snapshotRetention : undefined,
@@ -183,6 +184,7 @@ const getInitialState = ({ preSelectedVmIds, setHomeVmIdsSelection, suggestedExc
     _proxyId: undefined,
     _vmsPattern: undefined,
     backupMode: false,
+    cbtDestroySnapshotData: false,
     compression: undefined,
     crMode: false,
     deltaMode: false,
@@ -631,6 +633,13 @@ const New = decorate([
             preferNbd,
           })
         },
+      setCbtDestroySnapshotData:
+        ({ setGlobalSettings }, cbtDestroySnapshotData) =>
+        () => {
+          setGlobalSettings({
+            cbtDestroySnapshotData,
+          })
+        },
       setNbdConcurrency({ setGlobalSettings }, nbdConcurrency) {
         setGlobalSettings({
           nbdConcurrency,
@@ -641,16 +650,23 @@ const New = decorate([
           nRetriesVmBackupFailures: nRetries,
         })
       },
+      setBackupReportTpl({ setGlobalSettings }, compactBackupTpl) {
+        setGlobalSettings({
+          backupReportTpl: compactBackupTpl ? 'compactMjml' : 'mjml',
+        })
+      },
     },
     computed: {
       compressionId: generateId,
       formId: generateId,
       inputConcurrencyId: generateId,
+      inputCbtDestroySnapshotData: generateId,
       inputFullIntervalId: generateId,
       inputMaxExportRate: generateId,
       inputPreferNbd: generateId,
       inputNbdConcurrency: generateId,
       inputNRetriesVmBackupFailures: generateId,
+      inputBackupReportTplId: generateId,
       inputTimeoutId: generateId,
 
       // In order to keep the user preference, the offline backup is kept in the DB
@@ -758,6 +774,7 @@ const New = decorate([
     const { propSettings, settings = propSettings } = state
     const compression = defined(state.compression, job.compression, '')
     const {
+      cbtDestroySnapshotData,
       checkpointSnapshot,
       concurrency,
       fullInterval,
@@ -769,6 +786,7 @@ const New = decorate([
       preferNbd,
       reportRecipients,
       reportWhen = 'failure',
+      backupReportTpl = 'mjml',
       timeout,
     } = settings.get('') || {}
 
@@ -1051,21 +1069,47 @@ const New = decorate([
                         </FormGroup>
                       )}
                       {state.isDelta && (
-                        <FormGroup>
-                          <label htmlFor={state.inputPreferNbd}>
-                            <strong>{_('preferNbd')}</strong>{' '}
-                            <Tooltip content={_('preferNbdInformation')}>
-                              <Icon icon='info' />
+                        <div>
+                          <FormGroup>
+                            <label htmlFor={state.inputPreferNbd}>
+                              <strong>{_('preferNbd')}</strong>{' '}
+                              <Tooltip content={_('preferNbdInformation')}>
+                                <Icon icon='info' />
+                              </Tooltip>
+                            </label>
+                            <Toggle
+                              className='pull-right'
+                              id={state.inputPreferNbd}
+                              name='preferNbd'
+                              value={preferNbd}
+                              onChange={effects.setPreferNbd}
+                            />
+                          </FormGroup>
+                          <FormGroup>
+                            <label htmlFor={state.inputCbtDestroySnapshotData}>
+                              <strong>{_('cbtDestroySnapshotData')}</strong>{' '}
+                              <Tooltip content={_('cbtDestroySnapshotDataInformation')}>
+                                <Icon icon='info' />
+                              </Tooltip>
+                            </label>
+                            <Tooltip
+                              content={
+                                !preferNbd || state.snapshotMode
+                                  ? _('cbtDestroySnapshotDataDisabledInformation')
+                                  : undefined
+                              }
+                            >
+                              <Toggle
+                                className='pull-right'
+                                id={state.cbtDestroySnapshotData}
+                                name='cbtDestroySnapshotData'
+                                value={preferNbd && cbtDestroySnapshotData && !state.snapshotMode}
+                                disabled={!preferNbd || state.snapshotMode}
+                                onChange={effects.setCbtDestroySnapshotData}
+                              />
                             </Tooltip>
-                          </label>
-                          <Toggle
-                            className='pull-right'
-                            id={state.inputPreferNbd}
-                            name='preferNbd'
-                            value={preferNbd}
-                            onChange={effects.setPreferNbd}
-                          />
-                        </FormGroup>
+                          </FormGroup>
+                        </div>
                       )}
                       {state.isDelta && (
                         <FormGroup>
@@ -1126,6 +1170,17 @@ const New = decorate([
                         offlineSnapshot={offlineSnapshot}
                         setGlobalSettings={effects.setGlobalSettings}
                       />
+                      <FormGroup>
+                        <label htmlFor={state.inputBackupReportTplId}>
+                          <strong>{_('shorterBackupReports')}</strong>
+                        </label>
+                        <Toggle
+                          className='pull-right'
+                          id={state.inputBackupReportTplId}
+                          value={backupReportTpl === 'compactMjml'}
+                          onChange={effects.setBackupReportTpl}
+                        />
+                      </FormGroup>
                     </div>
                   )}
                 </CardBlock>

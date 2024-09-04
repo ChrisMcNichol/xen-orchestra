@@ -84,6 +84,7 @@ const messages = {
   pools: 'Pools',
   remotes: 'Remotes',
   schedulerGranularity: 'Scheduler granularity',
+  setCbtError: 'Set CBT error',
   socket: 'Socket',
   type: 'Type',
   restore: 'Restore',
@@ -242,8 +243,10 @@ const messages = {
   xoConfig: 'XO config',
   backupVms: 'VM Backup & Replication',
   backupMetadata: 'XO config & Pool metadata Backup',
+  backupModeSourceRemoteRequired: 'Backup mode and source remote are required',
   mirrorBackup: 'Mirror backup',
   mirrorBackupVms: 'VM Mirror Backup',
+  mirrorAllVmBackups: 'Mirror all {mode} VM backups',
   jobsOverviewPage: 'Overview',
   jobsNewPage: 'New',
   jobsSchedulingPage: 'Scheduling',
@@ -319,6 +322,7 @@ const messages = {
   homeFilterHvmGuests: 'HVM guests',
   homeSortBy: 'Sort by',
   homeSortByCpus: 'CPUs',
+  homeSortByInstallTime: 'Install time',
   homeSortByStartTime: 'Start time',
   homeSortByName: 'Name',
   homeSortByPowerstate: 'Power state',
@@ -523,9 +527,11 @@ const messages = {
   remotesSettings: 'Remotes settings',
   pluginsSettings: 'Plugins settings',
   pluginsWarning: 'To receive the report, the plugins backup-reports and transport-email need to be loaded.',
+  selectSchedule: 'Select a schedule…',
   scheduleAdd: 'Add a schedule',
   scheduleDelete: 'Delete',
   scheduleRun: 'Run schedule',
+  unnamedSchedule: 'Unnamed schedule',
   deleteSelectedSchedules: 'Delete selected schedules',
   noScheduledJobs: 'No scheduled jobs.',
   legacySnapshotsLink: 'You can delete all your legacy backup snapshots.',
@@ -552,6 +558,7 @@ const messages = {
   newBackupAdvancedSettings: 'Advanced settings',
   newBackupSettings: 'Settings',
   reportWhenAlways: 'Always',
+  reportWhenSkippedFailure: 'Skipped and failure',
   reportWhenFailure: 'Failure',
   reportWhenNever: 'Never',
   reportRecipients: 'Report recipients',
@@ -600,9 +607,16 @@ const messages = {
     'Delete old backups before backing up the VMs. If the new backup fails, you will lose your old backups.',
   customTag: 'Custom tag',
   editJobNotFound: "The job you're trying to edit wasn't found",
-  preferNbd: 'Use NBD protocol to transfer disk if available',
-  preferNbdInformation: 'A network accessible by XO or the proxy must have NBD enabled',
+  preferNbd: 'Use NBD + CBT to transfer disk if available',
+  preferNbdInformation:
+    'A network accessible by XO or the proxy must have NBD enabled. Storage must support Change Block Tracking (CBT) to use it in a backup',
   nbdConcurrency: 'Number of NBD connection per disk',
+  cbtDestroySnapshotData: 'Purge snapshot data when using CBT',
+  cbtDestroySnapshotDataInformation:
+    "The snapshot won't use any notable space on the SR, won't be shown in the UI and won't be usable to do a rollback",
+  cbtDestroySnapshotDataDisabledInformation:
+    'Snapshot data can be purged only when NBD is enabled and rolling snapshot is not used',
+  shorterBackupReports: 'Shorter backup reports',
 
   // ------ New Remote -----
   newRemote: 'New file system remote',
@@ -694,6 +708,8 @@ const messages = {
   newSr: 'New SR',
   newSrConfirm:
     'This will erase the entire disk or partition ({name}) to create a new storage repository. Are you sure you want to continue?',
+  newSrExistingSr:
+    'SR{n, plural, one {} other {s}} already exist on this device, as noted in the Storage Usage section. Creating this SR may erase the content of {path} and cause the loss of existing SR{n, plural, one {} other {s}}. Are you sure you want to continue?',
   newSrTitle: 'Create a new SR',
   newSrGeneral: 'General',
   newSrTypeSelection: 'Select storage type:',
@@ -1224,12 +1240,20 @@ const messages = {
   vmHaltedSince: 'Halted {ago}',
 
   // ----- VM general tab -----
+  availableForUefiOnly: 'This feature is only available for UEFI VMs.',
   noToolsDetected: 'No Xen tools detected',
   managementAgentDetected: 'Management agent {version} detected',
   managementAgentOutOfDate: 'Management agent {version} out of date',
   managementAgentNotDetected: 'Management agent not detected',
   noIpv4Record: 'No IPv4 record',
   noIpRecord: 'No IP record',
+  secureBootEnforced: 'Secure boot enforced',
+  secureBootNotEnforced: 'Secure boot not enforced',
+  secureBootNoDbx: 'Secure boot enforced, but no dbx present',
+  secureBootStatus: 'Secure boot status',
+  secureBootWantedButCertificatesMissing: 'Secure boot wanted, but some EFI certificates are missing',
+  secureBootWantedButDisabled: 'Secure boot wanted, but disabled due to the VM being in UEFI setup mode',
+  secureBootWantedPendingBoot: 'Secure boot wanted, pending first boot',
   started: 'Started {ago}',
   paraVirtualizedMode: 'Paravirtualization (PV)',
   hardwareVirtualizedMode: 'Hardware virtualization (HVM)',
@@ -1313,6 +1337,7 @@ const messages = {
   noControlDomainVdis: 'No VDIs attached to control domain',
   vbdBootableStatus: 'Boot flag',
   vbdDevice: 'Device',
+  vbdCbt: 'CBT',
   vbdStatus: 'Status',
   vbdStatusConnected: 'Connected',
   vbdStatusDisconnected: 'Disconnected',
@@ -1445,6 +1470,15 @@ const messages = {
     'If the VTPM is in use, removing it will result in a dangerous data loss. Are you sure you want to remove the VTPM?',
   infoUnknownPciOnNonRunningVm:
     "When a VM is offline, it's not attached to any host, and therefore, it's impossible to determine the associated PCI devices, as it depends on the hardware environment in which it would be deployed.",
+  coalesceLeaf: 'Coalesce leaf',
+  coalesceLeafSuccess: 'Coalesce leaf success',
+  coalesceLeafSuspendVm: 'This will suspend the VM during the operation. Do you want to continue?',
+  noSecureBoot: 'This pool was not setup for Guest UEFI SecureBoot yet',
+  propagateCertificatesTitle: 'Propagate certificates',
+  propagateCertificatesConfirm:
+    "This will overwrite the VM's UEFI certificates with certificates defined at the pool level. Continue?",
+  propagateCertificates: "Copy the pool's default UEFI certificates to the VM",
+  propagateCertificatesSuccessful: 'Certificates propagated successfully',
   poolAutoPoweronDisabled: 'Auto power on is disabled at pool level, click to fix automatically.',
   vmRemoveButton: 'Remove',
   vmConvertToTemplateButton: 'Convert to template',
@@ -1642,6 +1676,7 @@ const messages = {
   noLocalDefaultSrs: 'No local default SRs',
   noTooManySnapshotsObject: 'No VMs with too many snapshots',
   numberOfSnapshots: 'Number of snapshots',
+  guestToolsNecessary: 'Guest tools must be installed to display stats',
   guestToolStatus: 'Guest Tools status',
   guestToolStatusTip: 'VMs with missing or outdated guest tools',
   noGuestToolStatusObject: 'All running VMs have up to date guest tools',
@@ -2254,7 +2289,7 @@ const messages = {
   upgrade: 'Upgrade',
   downgrade: 'Downgrade',
   considerSubscribe:
-    'Please consider subscribing and trying it with all the features for free during 15 days on {link}.',
+    'Please consider subscribing and trying it with all the features for free during 30 days on {link}.',
   currentVersion: 'Current version:',
   register: 'Register',
   editRegistration: 'Edit registration',
@@ -2600,9 +2635,11 @@ const messages = {
   createXostoreConfirm:
     'If packages need to be installed, the toolstack on those hosts will restart. Do you want to continue?',
   diskAlreadyMounted: 'The disk is mounted on: {mountpoint}',
+  diskful: 'Diskful',
   diskHasExistingPartition: 'The disk has existing partition',
   diskIncompatibleXostor: 'Disk incompatible with XOSTOR',
   diskIsReadOnly: 'The disk is Read-Only',
+  diskless: 'Diskless',
   disks: 'Disks',
   fieldRequired: '{field} is required',
   fieldsMissing: 'Some fields are missing',
@@ -2642,6 +2679,7 @@ const messages = {
   setAsPreferred: 'Set as preferred',
   storage: 'Storage',
   summary: 'Summary',
+  tieBreaker: 'Tie breaker',
   whiteSpaceNotAllowed: 'White space not allowed',
   wrongNumberOfHosts: 'Wrong number of hosts',
   xostor: 'XOSTOR',
@@ -2828,6 +2866,16 @@ const messages = {
   secondsFormat: '{seconds, plural, one {# second} other {# seconds}}',
   durationFormat:
     '{days, plural, =0 {} one {# day } other {# days }}{hours, plural, =0 {} one {# hour } other {# hours }}{minutes, plural, =0 {} one {# minute } other {# minutes }}{seconds, plural, =0 {} one {# second} other {# seconds}}',
+
+  // ----- IPMI -----
+  highestCpuTemperature: '{n, number}x CPU{n, plural, one {} other {s}} (highest: {degres})',
+  highestFanSpeed: '{n, number}x fan{n, plural, one {} other {s}} (highest: {speed})',
+  inletTemperature: 'Inlet temperature',
+  ipmi: 'IPMI',
+  nFanStatus: '{n, number}x fan{n, plural, one {} other {s}} status: {status}',
+  nPsuStatus: '{n, number}x PSU{n, plural, one {} other {s}} status: {status}',
+  outletTemperature: 'Outlet temperature',
+  totalPower: 'Total power',
 }
 forEach(messages, function (message, id) {
   if (typeof message === 'string') {

@@ -14,6 +14,7 @@ import { injectState, provideState } from 'reaclette'
 import { every, isEmpty, mapValues, map } from 'lodash'
 import { Remote } from 'render-xo-item'
 import { SelectPool, SelectRemote } from 'select-objects'
+import { Toggle } from 'form'
 import {
   createMetadataBackupJob,
   createSchedule,
@@ -22,6 +23,7 @@ import {
   editSchedule,
   subscribeRemotes,
 } from 'xo'
+import { ReportRecipients } from '..'
 
 import { constructPattern, destructPattern, FormFeedback, FormGroup, Input, Li, Ul } from '../../utils'
 
@@ -180,6 +182,21 @@ export default decorate([
       setReportWhen({ setGlobalSettings }, { value }) {
         setGlobalSettings('reportWhen', value)
       },
+      addReportRecipient({ setGlobalSettings }, value) {
+        const { reportRecipients = [] } = this.state.settings?.[GLOBAL_SETTING_KEY] ?? {}
+        if (!reportRecipients.includes(value)) {
+          reportRecipients.push(value)
+          setGlobalSettings('reportRecipients', reportRecipients)
+        }
+      },
+      removeReportRecipient({ setGlobalSettings }, key) {
+        const { reportRecipients } = this.state.settings[GLOBAL_SETTING_KEY]
+        reportRecipients.splice(key, 1)
+        setGlobalSettings('reportRecipients', reportRecipients)
+      },
+      setBackupReportTpl({ setGlobalSettings }, compactBackupTpl) {
+        setGlobalSettings('backupReportTpl', compactBackupTpl ? 'compactMjml' : 'mjml')
+      },
       toggleMode:
         (_, { mode }) =>
         state => ({
@@ -200,6 +217,7 @@ export default decorate([
     },
     computed: {
       idForm: generateId,
+      inputBackupReportTplId: generateId,
 
       modePoolMetadata: ({ _modePoolMetadata }, { job }) =>
         defined(_modePoolMetadata, () => !isEmpty(destructPattern(job.pools))),
@@ -274,7 +292,11 @@ export default decorate([
       missingSchedules,
     } = state.showErrors ? state : {}
 
-    const { reportWhen = 'failure' } = defined(() => state.settings[GLOBAL_SETTING_KEY], {})
+    const {
+      reportWhen = 'failure',
+      reportRecipients = [],
+      backupReportTpl = 'mjml',
+    } = defined(() => state.settings[GLOBAL_SETTING_KEY], {})
 
     return (
       <form id={state.idForm}>
@@ -360,6 +382,22 @@ export default decorate([
                 <CardBlock>
                   <RemoteProxy onChange={effects.setProxy} value={state.proxyId} />
                   <ReportWhen onChange={effects.setReportWhen} required value={reportWhen} />
+                  <ReportRecipients
+                    recipients={reportRecipients}
+                    add={effects.addReportRecipient}
+                    remove={effects.removeReportRecipient}
+                  />
+                  <FormGroup>
+                    <label htmlFor={state.inputBackupReportTplId}>
+                      <strong>{_('shorterBackupReports')}</strong>
+                    </label>
+                    <Toggle
+                      className='pull-right'
+                      id={state.inputBackupReportTplId}
+                      value={backupReportTpl === 'compactMjml'}
+                      onChange={effects.setBackupReportTpl}
+                    />
+                  </FormGroup>
                 </CardBlock>
               </Card>
             </Col>

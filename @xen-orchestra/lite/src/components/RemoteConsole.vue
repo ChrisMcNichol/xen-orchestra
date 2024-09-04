@@ -4,18 +4,18 @@
 
 <script lang="ts" setup>
 import { useXenApiStore } from '@/stores/xen-api.store'
-import VncClient from '@novnc/novnc/core/rfb'
+import VncClient from '@novnc/novnc/lib/rfb'
 import { promiseTimeout } from '@vueuse/shared'
 import { fibonacci } from 'iterable-backoff'
 import { computed, onBeforeUnmount, ref, watchEffect } from 'vue'
-
-const N_TOTAL_TRIES = 8
-const FIBONACCI_MS_ARRAY: number[] = Array.from(fibonacci().toMs().take(N_TOTAL_TRIES))
 
 const props = defineProps<{
   location: string
   isConsoleAvailable: boolean
 }>()
+
+const N_TOTAL_TRIES = 8
+const FIBONACCI_MS_ARRAY: number[] = Array.from(fibonacci().toMs().take(N_TOTAL_TRIES))
 
 const vmConsoleContainer = ref<HTMLDivElement>()
 const xenApiStore = useXenApiStore()
@@ -32,7 +32,7 @@ const url = computed(() => {
 let vncClient: VncClient | undefined
 let nConnectionAttempts = 0
 
-const handleDisconnectionEvent = () => {
+function handleDisconnectionEvent() {
   clearVncClient()
 
   if (props.isConsoleAvailable) {
@@ -51,9 +51,12 @@ const handleDisconnectionEvent = () => {
     createVncConnection()
   }
 }
-const handleConnectionEvent = () => (nConnectionAttempts = 0)
 
-const clearVncClient = () => {
+function handleConnectionEvent() {
+  nConnectionAttempts = 0
+}
+
+function clearVncClient() {
   if (vncClient === undefined) {
     return
   }
@@ -61,14 +64,12 @@ const clearVncClient = () => {
   vncClient.removeEventListener('disconnect', handleDisconnectionEvent)
   vncClient.removeEventListener('connect', handleConnectionEvent)
 
-  if (vncClient._rfbConnectionState !== 'disconnected') {
-    vncClient.disconnect()
-  }
+  vncClient.disconnect()
 
   vncClient = undefined
 }
 
-const createVncConnection = async () => {
+async function createVncConnection() {
   if (nConnectionAttempts !== 0) {
     await promiseTimeout(FIBONACCI_MS_ARRAY[nConnectionAttempts - 1])
 

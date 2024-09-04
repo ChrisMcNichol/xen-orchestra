@@ -1,105 +1,149 @@
-import type { XoObject, XoObjectContext, XoObjectType, XoObjectTypeToXoObject } from '@/types/xo-object.type'
-import { restApiConfig } from '@/utils/rest-api-config.util'
+import type {
+  TypeToCollectionRecord,
+  TypeToSingleRecord,
+  XoCollectionRecord,
+  XoCollectionRecordContext,
+  XoCollectionRecordType,
+  XoSingleRecord,
+  XoSingleRecordContext,
+  XoSingleRecordType,
+} from '@/types/xo'
+import { xoApiDefinition } from '@/utils/xo-api-definition.util'
 import type { SubscribableStoreConfig } from '@core/types/subscribable-store.type'
-import { useFetch } from '@vueuse/core'
+import type { VoidFunction } from '@core/types/utility.type'
+import { toArray } from '@core/utils/to-array.utils'
+import { noop, useFetch, useIntervalFn } from '@vueuse/core'
 import { computed, readonly, ref, shallowReactive } from 'vue'
 
+type SingleOptions = {
+  pollInterval?: number
+}
+
+type CollectionOptions<TRecord extends XoCollectionRecord> = {
+  sortBy?: (a: TRecord, b: TRecord) => number
+  pollInterval?: number
+}
+
 export function createXoStoreConfig<
-  TType extends XoObjectType,
-  TXoObjectInput extends XoObjectTypeToXoObject<TType>,
-  TBeforeAdd extends ((input: TXoObjectInput) => undefined | XoObject) | undefined = (
-    input: TXoObjectInput
-  ) => TXoObjectInput,
-  TXoObject extends XoObject = TBeforeAdd extends (input: TXoObjectInput) => any
-    ? NonNullable<ReturnType<TBeforeAdd>>
-    : TXoObjectInput,
->(
-  type: TType,
-  options?: {
-    sortBy?: (a: TXoObject, b: TXoObject) => number
-    beforeAdd?: TBeforeAdd
-  }
-): SubscribableStoreConfig<XoObjectContext<TXoObject>> {
-  const recordsById = shallowReactive(new Map<TXoObject['id'], TXoObject>())
-  const records = computed(() => {
-    const results = Array.from(recordsById.values())
+  TType extends XoSingleRecordType,
+  TRecord extends XoSingleRecord = TypeToSingleRecord<TType>,
+>(type: TType, options?: SingleOptions): SubscribableStoreConfig<XoSingleRecordContext<TRecord>>
 
-    if (options?.sortBy) {
-      return results.sort(options.sortBy)
-    }
+export function createXoStoreConfig<
+  TType extends XoCollectionRecordType,
+  TRecord extends XoCollectionRecord = TypeToCollectionRecord<TType>,
+>(type: TType, options?: CollectionOptions<TRecord>): SubscribableStoreConfig<XoCollectionRecordContext<TRecord>>
 
-    return results
-  })
+export function createXoStoreConfig(
+  type: XoSingleRecordType | XoCollectionRecordType,
+  options?: any
+): SubscribableStoreConfig<any> {
+  const singleRecordId = Symbol('singleRecordId')
 
-  const get = (id: TXoObject['id']) => recordsById.get(id)
+  const apiDefinition = xoApiDefinition[type]
 
-  const has = (id: TXoObject['id']) => recordsById.has(id)
+  const isCollection = apiDefinition.type === 'collection'
+
+  const recordsById = shallowReactive(new Map())
+
+  const urlParams = new URLSearchParams(`fields=${apiDefinition.fields}`)
+
+  const url = `/rest/v0/${apiDefinition.path}?${urlParams.toString()}`
 
   const isReady = ref(false)
 
-  const urlParams = new URLSearchParams(`fields=${restApiConfig[type].fields}`)
+  const { isFetching, error, execute, canAbort, abort, data } = useFetch(url, {
+    immediate: false,
+    beforeFetch({ options }) {
+      options.credentials = 'include'
 
-  const { isFetching, error, execute, canAbort, abort, data } = useFetch(
-    `/rest/v0/${restApiConfig[type].path}?${urlParams.toString()}`,
-    {
-      immediate: false,
-      beforeFetch({ options }) {
-        options.credentials = 'include'
-
-        return { options }
-      },
-    }
-  )
+      return { options }
+    },
+  })
     .get()
-    .json<TXoObjectInput[]>()
+    .json()
 
-  const hasError = computed(() => error.value !== undefined)
+  const hasError = computed(() => !!error.value)
 
-  const handleAdd = (record: TXoObjectInput) => {
-    const recordToAdd = options?.beforeAdd ? options.beforeAdd(record) : record
+  const loadData = async () => {
+    await execute()
 
-    if (recordToAdd === undefined) {
+    recordsById.clear()
+
+    if (!data.value) {
       return
     }
+    toArray(data.value).forEach(item => {
+      const recordToAdd = apiDefinition.handler(item) as any
 
-    recordsById.set(record.id, recordToAdd as TXoObject)
-  }
+      if (recordToAdd === undefined) {
+        return
+      }
 
-  const handleAfterLoad = (records: TXoObjectInput[]) => {
-    records.forEach(record => handleAdd(record))
+      recordsById.set(isCollection ? recordToAdd.id : singleRecordId, recordToAdd)
+    })
+
     isReady.value = true
   }
 
-  const onSubscribe = async () => {
-    await execute()
+  let startSubscription: VoidFunction = () => loadData()
 
-    if (data.value) {
-      handleAfterLoad(data.value)
-    }
+  let stopSubscription: VoidFunction = noop
+
+  if (options?.pollInterval !== undefined) {
+    const { pause, resume } = useIntervalFn(() => loadData(), options.pollInterval, {
+      immediate: false,
+      immediateCallback: true,
+    })
+
+    startSubscription = () => resume()
+    stopSubscription = () => pause()
   }
+
+  const onSubscribe = () => startSubscription()
 
   const onUnsubscribe = () => {
     if (canAbort.value) {
       abort()
     }
 
+    stopSubscription()
+
     isReady.value = false
   }
 
-  const context = {
-    records,
-    get,
-    has,
-    isFetching: readonly(isFetching),
-    isReady: readonly(isReady),
-    lastError: readonly(error),
-    hasError,
-  } as XoObjectContext<TXoObject>
-
   return {
-    context,
+    context: {
+      ...createRecordContext(isCollection, recordsById, singleRecordId, options),
+      isFetching: readonly(isFetching),
+      isReady: readonly(isReady),
+      lastError: readonly(error),
+      hasError,
+    },
     onSubscribe,
     onUnsubscribe,
     isEnabled: true,
   }
+}
+
+function createRecordContext(isCollection: boolean, recordsById: Map<any, any>, singleRecordId: any, options: any) {
+  return isCollection
+    ? {
+        records: computed(() => {
+          const results = Array.from(recordsById.values())
+
+          const sortBy = (options as CollectionOptions<any>)?.sortBy
+
+          if (sortBy) {
+            results.sort(sortBy)
+          }
+
+          return results
+        }),
+        get: (id: any) => recordsById.get(id),
+        has: (id: any) => recordsById.has(id),
+      }
+    : {
+        record: computed(() => recordsById.get(singleRecordId)),
+      }
 }

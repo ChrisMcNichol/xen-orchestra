@@ -3,18 +3,17 @@
 > Keep in mind the changelog is addressed to **users** and should be
 > understandable by them.
 
+### Security
+
+> Security fixes and new features should go in this section
+
 ### Enhancements
 
 > Users must be able to say: “Nice enhancement, I'm eager to test it”
 
-- [Netbox] Check Netbox version before attempting to synchronize (PR [#7735](https://github.com/vatesfr/xen-orchestra/pull/7735))
-- [Netbox] Support Netbox 4 (Thanks [@ChrisMcNichol](https://github.com/ChrisMcNichol)!) (PR [#7735](https://github.com/vatesfr/xen-orchestra/pull/7735))
-
 ### Bug fixes
 
 > Users must be able to say: “I had this issue, happy to know it's fixed”
-
-- [V2V] Fix VSAN import not used when importing from VSAN ([PR #7717](https://github.com/vatesfr/xen-orchestra/pull/7717))
 
 ### Packages to release
 
@@ -31,12 +30,5 @@
 > Keep this list alphabetically ordered to avoid merge conflicts
 
 <!--packages-start-->
-
-- @vates/fuse-vhd patch
-- @xen-orchestra/proxy-cli patch
-- @xen-orchestra/vmware-explorer patch
-- xo-server-backup-reports major
-- xo-server-netbox minor
-- xo-web patch
 
 <!--packages-end-->

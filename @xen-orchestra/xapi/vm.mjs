@@ -69,14 +69,14 @@ function getVmAddress(networks) {
   throw new Error('no VM address found')
 }
 
-async function listNobakVbds(xapi, vbdRefs) {
+async function listTaggedVdiVbds(xapi, vbdRefs, tag) {
   const vbds = []
   await asyncMap(vbdRefs, async vbdRef => {
     const vbd = await xapi.getRecord('VBD', vbdRef)
     if (
       vbd.type === 'Disk' &&
       Ref.isNotEmpty(vbd.VDI) &&
-      (await xapi.getField('VDI', vbd.VDI, 'name_label')).startsWith('[NOBAK]')
+      (await xapi.getField('VDI', vbd.VDI, 'name_label')).includes(tag)
     ) {
       vbds.push(vbd)
     }
@@ -599,10 +599,37 @@ class Vm {
     }
   }
 
+  async coalesceLeaf($defer, vmRef) {
+    try {
+      await this.callAsync('VM.suspend', vmRef)
+      $defer(() => this.callAsync('VM.resume', vmRef, false, true))
+    } catch (error) {
+      if (error.code !== 'VM_BAD_POWER_STATE') {
+        throw error
+      }
+
+      const powerState = error.params[2].toLowerCase()
+      if (powerState !== 'halted' && powerState !== 'suspended') {
+        throw error
+      }
+    }
+
+    // plugin doc: https://docs.xenserver.com/en-us/xenserver/8/storage/manage.html#reclaim-space-by-using-the-offline-coalesce-tool
+    // result can be: `Success` or `VM has no leaf-coalesceable VDIs`
+    // https://github.com/xapi-project/sm/blob/eb292457c5fd5f00f6fc82454a915068ab15aa6f/drivers/coalesce-leaf#L48
+    const result = await this.callAsync('host.call_plugin', this.pool.master, 'coalesce-leaf', 'leaf-coalesce', {
+      vm_uuid: await this.getField('VM', vmRef, 'uuid'),
+    })
+
+    if (result.toLowerCase() !== 'success') {
+      throw new Error(result)
+    }
+  }
+
   async snapshot(
     $defer,
     vmRef,
-    { cancelToken = CancelToken.none, ignoreNobakVdis = false, name_label, unplugVusbs = false } = {}
+    { cancelToken = CancelToken.none, ignoredVdisTag, name_label, unplugVusbs = false } = {}
   ) {
     const vm = await this.getRecord('VM', vmRef)
 
@@ -624,13 +651,15 @@ class Vm {
     }
 
     let ignoredVbds
-    if (ignoreNobakVdis) {
-      ignoredVbds = await listNobakVbds(this, vm.VBDs)
-      ignoreNobakVdis = ignoredVbds.length !== 0
+    if (ignoredVdisTag !== undefined) {
+      ignoredVbds = await listTaggedVdiVbds(this, vm.VBDs, ignoredVdisTag)
+      if (ignoredVbds.length === 0) {
+        ignoredVbds = undefined
+      }
     }
 
     const params = [cancelToken, 'VM.snapshot', vmRef, name_label ?? vm.name_label]
-    if (ignoreNobakVdis) {
+    if (ignoredVbds !== undefined) {
       params.push(ignoredVbds.map(_ => _.VDI))
     }
 
@@ -643,7 +672,7 @@ class Vm {
         throw error
       }
 
-      if (ignoreNobakVdis) {
+      if (ignoredVbds !== undefined) {
         if (isHalted) {
           await asyncMap(ignoredVbds, async vbd => {
             await this.VBD_destroy(vbd.$ref)
@@ -676,11 +705,14 @@ class Vm {
     )
 
     if (destroyNobakVdis) {
-      await asyncMap(await listNobakVbds(this, await this.getField('VM', ref, 'VBDs')), async vbd => {
+      // destroy the ignored VBDs on the VM snapshot
+      const ignoredSnapshotVbds = await listTaggedVdiVbds(this, await this.getField('VM', ref, 'VBDs'), ignoredVdisTag)
+      await asyncMap(ignoredSnapshotVbds, async vbd => {
         try {
           await this.VDI_destroy(vbd.VDI)
         } catch (error) {
-          warn('VM_snapshot, failed to destroy snapshot NOBAK VDI', {
+          warn('VM_snapshot, failed to destroy ignored snapshot VDI', {
+            error,
             vdiRef: vbd.VDI,
             vmRef,
             vmSnapshotRef: ref,
@@ -691,6 +723,11 @@ class Vm {
 
     return ref
   }
+
+  async disableChangedBlockTracking(vmRef) {
+    const vdiRefs = await this.VM_getDisks(vmRef)
+    await Promise.all(vdiRefs.map(vdiRef => this.call('VDI.disable_cbt', vdiRef)))
+  }
 }
 export default Vm
 
@@ -698,5 +735,6 @@ decorateClass(Vm, {
   checkpoint: defer,
   create: defer,
   export: defer,
+  coalesceLeaf: defer,
   snapshot: defer,
 })

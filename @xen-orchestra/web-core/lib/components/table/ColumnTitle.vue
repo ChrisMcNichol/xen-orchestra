@@ -18,8 +18,8 @@
     </template>
     <MenuItem
       v-for="interaction in interactions"
-      v-tooltip="$t('core.coming-soon')"
       :key="interaction.id"
+      v-tooltip="$t('coming-soon')"
       :disabled="interaction.disabled"
       :on-click="() => updateInteraction(interaction)"
     >
@@ -32,16 +32,16 @@
 </template>
 
 <script lang="ts" setup>
-import MenuList from '@core/components/menu/MenuList.vue'
-import MenuItem from '@core/components/menu/MenuItem.vue'
 import UiIcon from '@core/components/icon/UiIcon.vue'
+import MenuItem from '@core/components/menu/MenuItem.vue'
+import MenuList from '@core/components/menu/MenuList.vue'
 import { vTooltip } from '@core/directives/tooltip.directive'
+import type { IconDefinition } from '@fortawesome/fontawesome-common-types'
 import { faArrowDown, faArrowUp, faEyeSlash, faFilter, faLayerGroup } from '@fortawesome/free-solid-svg-icons'
 import { noop } from '@vueuse/core'
-import type { IconDefinition } from '@fortawesome/fontawesome-common-types'
 import { computed, inject } from 'vue'
-import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 
 type InteractionId = 'sort-asc' | 'sort-desc' | 'group' | 'filter' | 'hide'
 type Interaction = {
@@ -76,11 +76,11 @@ const interactions = computed<Interaction[]>(() => [
 
 const tableName = inject<string>('tableName')
 
+const columnName = `${tableName}__${props.id}`
+
 const currentInteraction = computed(() =>
   interactions.value.find(interaction => router.currentRoute.value.query[columnName] === interaction.id)
 )
-
-const columnName = `${tableName}__${props.id}`
 
 const updateInteraction = (interaction: Interaction) => {
   router.replace({

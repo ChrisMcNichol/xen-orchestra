@@ -85,8 +85,8 @@ import StoryWidget from '@/components/component-story/StoryWidget.vue'
 import UiIcon from '@/components/ui/icon/UiIcon.vue'
 import { useModal } from '@/composables/modal.composable'
 import useSortedCollection from '@/composables/sorted-collection.composable'
-import { vTooltip } from '@core/directives/tooltip.directive'
 import type { PropParam } from '@/libs/story/story-param'
+import { vTooltip } from '@core/directives/tooltip.directive'
 import { faClose, faRepeat } from '@fortawesome/free-solid-svg-icons'
 import { useVModel } from '@vueuse/core'
 import { toRef } from 'vue'
@@ -96,6 +96,11 @@ const props = defineProps<{
   modelValue: Record<string, any>
 }>()
 
+const emit = defineEmits<{
+  reset: []
+  'update:modelValue': [value: any]
+}>()
+
 const params = useSortedCollection(toRef(props, 'params'), (p1, p2) => {
   if (p1.isRequired() === p2.isRequired()) {
     return 0
@@ -103,11 +108,6 @@ const params = useSortedCollection(toRef(props, 'params'), (p1, p2) => {
 
   return p1.isRequired() ? -1 : 1
 })
-
-const emit = defineEmits<{
-  reset: []
-  'update:modelValue': [value: any]
-}>()
 
 const model = useVModel(props, 'modelValue', emit)
 

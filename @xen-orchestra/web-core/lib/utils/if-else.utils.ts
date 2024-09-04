@@ -1,4 +1,4 @@
-import type { MaybeArray } from '@core/types/utility.type'
+import type { MaybeArray, VoidFunction } from '@core/types/utility.type'
 import { toArray } from '@core/utils/to-array.utils'
 import { watch, type WatchOptions, type WatchSource } from 'vue'
 
